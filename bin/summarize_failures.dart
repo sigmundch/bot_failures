@@ -12,7 +12,7 @@ Prints a list of tests whose expectations was incorrect in a single bot run.
 This includes tests that failed, or test that were expected to fail but started
 passing.
 
-usage: dart bin/summarize_failures.dart <descriptor>
+usage: bot_failure_summary <descriptor>
 
 where <descriptor> can be:
   - a full url to the stdout of a specific bot.
@@ -21,9 +21,9 @@ where <descriptor> can be:
     results for it.
 
 Examples:
-  dart bin/summarize_failures.dart https://build.chromium.org/p/client.dart/builders/dart2js-win8-ie11-be/builds/232/steps/steps/logs/stdio
-  dart bin/summarize_failures.dart dart2js-win8-ie11-be/builds/232
-  dart bin/summarize_failures.dart dart2js-win8-ie11-be
+  bot_failure_summary https://build.chromium.org/p/client.dart/builders/dart2js-win8-ie11-be/builds/232/steps/steps/logs/stdio
+  bot_failure_summary dart2js-win8-ie11-be/builds/232
+  bot_failure_summary dart2js-win8-ie11-be
 ''');
     exit(1);
   }

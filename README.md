@@ -6,7 +6,8 @@ because they started passing).
 
 ### Usage
 ```
-dart bin/summarize_failures.dart <descriptor>
+pub global activate -s git https://github.com/sigmundch/bot_failures
+bot_failure_summary <descriptor>
 ```
 
 where `<descriptor>` can be:
@@ -20,16 +21,16 @@ Examples:
   - prints the unexpected results of build 232 on the `dart2js-win8-ie11-be`
     bot.
 ```
-  dart bin/summarize_failures.dart https://build.chromium.org/p/client.dart/builders/dart2js-win8-ie11-be/builds/232/steps/steps/logs/stdio
+  bot_failure_summary https://build.chromium.org/p/client.dart/builders/dart2js-win8-ie11-be/builds/232/steps/steps/logs/stdio
 ```
   - prints the unexpected results of build 232 on the `dart2js-win8-ie11-be`
     bot.
 
 ```
-  dart bin/summarize_failures.dart dart2js-win8-ie11-be/builds/232
+  bot_failure_summary dart2js-win8-ie11-be/builds/232
 ```
   - prints the unexpected results of the latest build on the
     `dart2js-win8-ie11-be` bot.
 ```
-  dart bin/summarize_failures.dart dart2js-win8-ie11-be
+  bot_failure_summary dart2js-win8-ie11-be
 ```
