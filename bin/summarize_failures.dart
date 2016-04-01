@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 const _prefix = 'http://build.chromium.org/p/client.dart';
-const _suffix = 'steps/steps/logs/stdio';
+const _suffix = 'steps/steps/logs/stdio/text';
 
 main(args) async {
   if (args.length == 0) {
@@ -43,6 +43,7 @@ Examples:
     var lastBuild = json['cachedBuilds'].last - (isBuilding ? 1 : 0);
     url = '$_prefix/builders/$builder/builds/$lastBuild/$_suffix';
   }
+  if (url.endsWith('/stdio')) url = '$url/text';
   print('Loading data from: $url');
   var response = await http.get(url);
   var body = response.body;
