@@ -4,9 +4,19 @@ This repo contains a little script to process the output of the dart build bots
 and print which tests have unexpected resutls (either because they failed or
 because they started passing).
 
-### Usage
+### Installation
+
+The easiest way is to do a pub global activate:
 ```
 pub global activate -s git https://github.com/sigmundch/bot_failures
+```
+
+This will add `bot_failure_summary` to the set of binaries in the pub cache. Make sure `~/.pub-cache/bin/` is in your `PATH`.
+
+Alternatively, you can clone this repo, call pub-get, and invoke `bin/summary_failures.dart`.
+
+### Usage
+```
 bot_failure_summary <descriptor>
 ```
 
