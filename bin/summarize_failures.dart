@@ -29,7 +29,7 @@ Examples:
   }
   var arg = args[0];
   var url;
-  if (arg.startsWith('http:')) {
+  if (arg.startsWith('http:') || arg.startsWith('https://')) {
     url = arg;
   } else if (arg.contains('/')) {
     // arg is of the form: dart2js-linux-chromeff-4-4-be/builds/183
@@ -46,6 +46,12 @@ Examples:
   if (url.endsWith('/stdio')) url = '$url/text';
   print('Loading data from: $url');
   var response = await http.get(url);
+
+  if (response.statusCode != 200) {
+    print('HttpError: ${response.reasonPhrase}');
+    exit(1);
+  }
+
   var body = response.body;
 
   var records = [];
