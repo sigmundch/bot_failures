@@ -49,6 +49,7 @@ Examples:
   bot_failure_summary dart2js-win8-ie11-be
 ```
 
-when present `--show-repro` will add an extra line showing the command you can
-use to rerun the test locally. This can be useful not only to run the test, but
-also to see some flags that are not shown in the summary.
+when present `--show-repro` also shows the command you can use to repro the
+test locally. This repro command includes flags that were passed to the test,
+which are not normally displayed in the summary. If you notice two identical
+entries in the summary, they likely differ in a flag on ther repro command.
