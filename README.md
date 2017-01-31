@@ -1,12 +1,12 @@
 ## Summarize Failures
 
 This repo contains a little script to process the output of the dart build bots
-and print which tests have unexpected resutls (either because they failed or
+and print which tests have unexpected results (either because they failed or
 because they started passing).
 
 ### Installation
 
-The easiest way is to do a pub global activate:
+The easiest way is to do use it is to do a pub global activate:
 ```
 pub global activate -s git https://github.com/sigmundch/bot_failures
 ```
@@ -17,7 +17,7 @@ Alternatively, you can clone this repo, call pub-get, and invoke `bin/summary_fa
 
 ### Usage
 ```
-bot_failure_summary <descriptor>
+bot_failure_summary <descriptor> [--show-repro]
 ```
 
 where `<descriptor>` can be:
@@ -25,6 +25,10 @@ where `<descriptor>` can be:
   - the segment of the url containing the bot name and build id number.
   - the name of the bot, in which case the tool finds the latest build and show
     results for it.
+
+The most reliable descriptor is the full URL to a status file. The other two
+rely on guessing what kind of steps are defined in that bot, which has only been
+tested on browser bots that have a single step or that use annotated-steps.
 
 Examples:
 
@@ -44,3 +48,7 @@ Examples:
 ```
   bot_failure_summary dart2js-win8-ie11-be
 ```
+
+when present `--show-repro` will add an extra line showing the command you can
+use to rerun the test locally. This can be useful not only to run the test, but
+also to see some flags that are not shown in the summary.
