@@ -85,9 +85,10 @@ Examples:
         suite = test.substring(0, slash).trim();
         test = test.substring(slash + 1).trim();
       }
-      config = line.substring("FAILED: ".length, space)
-        .replaceAll('release_ia32', '')
-        .replaceAll('release_x64', '');
+      config = line
+          .substring("FAILED: ".length, space)
+          .replaceAll('release_ia32', '')
+          .replaceAll('release_x64', '');
     }
     if (line.startsWith("Expected: ")) {
       expected = line.substring("Expected: ".length).trim();
@@ -96,8 +97,8 @@ Examples:
       actual = line.substring("Actual: ".length).trim();
     }
     if (reproIsNext) {
-      records.add(
-          new _Record(suite, test, config, expected, actual, line.trim()));
+      records
+          .add(new _Record(suite, test, config, expected, actual, line.trim()));
       suite = test = config = expected = actual = null;
       reproIsNext = false;
     }
@@ -111,6 +112,7 @@ Examples:
     var color = r.isPassing ? 32 : 31;
     return '\x1b[${color}m${r.actual}\x1b[0m';
   }
+
   var last;
   var total = 0;
   var passing = 0;
@@ -123,7 +125,8 @@ Examples:
     total++;
     if (record.isPassing) passing++;
   }
-  print('Total: ${total} unexpected result(s), $passing now passing, ${total - passing} now failing.');
+  print(
+      'Total: ${total} unexpected result(s), $passing now passing, ${total - passing} now failing.');
   print('');
 }
 
@@ -143,7 +146,8 @@ class _Record implements Comparable {
   final String repro;
   bool get isPassing => actual == 'Pass';
 
-  _Record(this.suite, this.test, this.config, this.expected, this.actual, this.repro);
+  _Record(this.suite, this.test, this.config, this.expected, this.actual,
+      this.repro);
 
   int compareTo(_Record other) {
     if (suite == null && other.suite != null) return -1;
@@ -161,9 +165,11 @@ class _Record implements Comparable {
     return repro.compareTo(other.repro);
   }
 
-  bool operator ==(_Record other) => suite == other.suite &&
-      test == other.test && config == other.config &&
-      expected == other.expected && actual == other.actual &&
+  bool operator ==(_Record other) =>
+      suite == other.suite &&
+      test == other.test &&
+      config == other.config &&
+      expected == other.expected &&
+      actual == other.actual &&
       repro == other.repro;
 }
-
