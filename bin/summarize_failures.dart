@@ -1,13 +1,12 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/args.dart';
 import 'package:http/http.dart' as http;
 import 'package:bot_failures/record.dart';
 import 'package:bot_failures/log_parser.dart';
+import 'package:bot_failures/bot_json_api.dart';
 
-const _prefix = 'http://build.chromium.org/p/client.dart';
 const _defaultSuffix = 'steps/steps/logs/stdio/text';
 const _annotatedStepsSuffix = 'steps/annotated_steps/logs/stdio/text';
 
@@ -19,8 +18,15 @@ ArgParser parser = new ArgParser(allowTrailingOptions: true)
   ..addFlag('status-file-updates',
       negatable: false,
       defaultsTo: false,
-      help: 'Print lines to update a test status in .status files. '
+      help: 'Print lines to update a test status in .status files. \n'
           'Can\'t be used with several builds or summary flags below.')
+  ..addFlag('find-failing-steps',
+      negatable: false,
+      defaultsTo: false,
+      help: '(experimental) read the bot json API to find failing steps. \n'
+          'By default the script looks up for a step named "steps" or \n'
+          '"annotated_steps" but not all bots define these. \n'
+          'This option only works when the descriptor is a builder name. \n')
   ..addOption('builds',
       defaultsTo: '1',
       abbr: 'b',
@@ -51,9 +57,7 @@ main(args) async {
       return;
     }
 
-    var numBuilds =
-        int.parse(options['builds'], onError: (s) => s == 'all' ? 10000 : 0);
-    var urls = await _buildLogUrls(descriptor, numBuilds);
+    var urls = await _buildLogUrls(descriptor, options);
     if (urls.length != 1) {
       print('Will download ${urls.length} urls.');
       print('');
@@ -145,7 +149,7 @@ _pad(s, n, {left: false, padchar: ' '}) {
 }
 
 /// Uses several heuristics to construct a URI where to fetch log data from.
-Future<List<String>> _buildLogUrls(String descriptor, int numBuilds) async {
+Future<List<String>> _buildLogUrls(String descriptor, ArgResults options) async {
   // descriptor is a full URI
   if (descriptor.startsWith('http:') || descriptor.startsWith('https://')) {
     return [descriptor];
@@ -154,7 +158,7 @@ Future<List<String>> _buildLogUrls(String descriptor, int numBuilds) async {
   // descriptor is of the form: dart2js-linux-chromeff-4-4-be/builds/183
   if (descriptor.contains('/')) {
     if (!descriptor.endsWith('/')) descriptor = '$descriptor/';
-    var url = '$_prefix/builders/$descriptor';
+    var url = '$botPrefix/builders/$descriptor';
     if (descriptor.contains('dartium')) {
       url = '$url$_annotatedStepsSuffix';
     } else {
@@ -165,16 +169,26 @@ Future<List<String>> _buildLogUrls(String descriptor, int numBuilds) async {
 
   // descriptor is the name of a builder
   var builder = descriptor;
-  List<int> builds = await _recentBuilds(builder, numBuilds);
+  var numBuilds =
+    int.parse(options['builds'], onError: (s) => s == 'all' ? 10000 : 0);
+  List<int> builds = await recentBuilds(builder, numBuilds);
   List<String> result = <String>[];
+  bool findFailuresExperiment = options['find-failing-steps'];
   for (var n in builds) {
-    var url = '$_prefix/builders/$builder/builds/$n/';
-    if (builder.contains('dartium')) {
-      url = '$url$_annotatedStepsSuffix';
+    var url = '$botPrefix/builders/$builder/builds/$n/';
+    if (findFailuresExperiment) {
+      var steps = await failingSteps(builder, n);
+      for (var step in steps) {
+        result.add('${url}steps/${Uri.encodeComponent(step)}/logs/stdio/text');
+      }
     } else {
-      url = '$url$_defaultSuffix';
+      if (builder.contains('dartium')) {
+        url = '$url$_annotatedStepsSuffix';
+      } else {
+        url = '$url$_defaultSuffix';
+      }
+      result.add(url);
     }
-    result.add(url);
   }
   return result;
 }
@@ -194,16 +208,6 @@ Future<String> _fetchLog(String url) async {
   return response.body;
 }
 
-/// Uses the json API of buildbot to determine the last [count] build ids of a
-/// specific builder.
-Future<List<int>> _recentBuilds(String builder, [int count = 1]) async {
-  var response = await http.get('$_prefix/json/builders/$builder/?as_text=1');
-  var json = JSON.decode(response.body);
-  var isBuilding = json['state'] == 'building';
-  var buildNums = json['cachedBuilds'];
-  if (isBuilding) buildNums.removeLast();
-  return buildNums.reversed.take(count).toList();
-}
 
 void showUsage() {
   print('''
