@@ -1,8 +1,11 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:convert';
+import 'dart:io';
+
 import 'package:args/args.dart';
 import 'package:http/http.dart' as http;
+import 'package:bot_failures/record.dart';
+import 'package:bot_failures/log_parser.dart';
 
 const _prefix = 'http://build.chromium.org/p/client.dart';
 const _defaultSuffix = 'steps/steps/logs/stdio/text';
@@ -12,12 +15,19 @@ ArgParser parser = new ArgParser(allowTrailingOptions: true)
   ..addFlag('show-repro',
       negatable: false,
       defaultsTo: false,
-      help: 'Whether to show reproduction command.')
+      help: 'Show reproduction command for each failing test.')
+  ..addFlag('status-file-updates',
+      negatable: false,
+      defaultsTo: false,
+      help: 'Print lines to update a test status in .status files. '
+          'Can\'t be used with several builds or summary flags below.')
   ..addOption('builds',
       defaultsTo: '1',
+      abbr: 'b',
       help: 'Number of builds to get.\n'
           'Only works when only specifying bot name.\n'
           'Will fetch latest n builds. Also accepts "all".')
+  ..addOption('help', abbr: 'h', help: 'Show this help.')
   ..addFlag('summarize',
       negatable: false,
       defaultsTo: false,
@@ -26,150 +36,66 @@ ArgParser parser = new ArgParser(allowTrailingOptions: true)
           'E.g. if one test failed on two builds it will show that.');
 
 main(args) async {
-  ArgResults options = parser.parse(args);
-  if (options.rest.length != 1) {
-    print('''
-Prints a list of tests whose expectations was incorrect in a single bot run.
-This includes tests that failed, or test that were expected to fail but started
-passing.
-
-usage: bot_failure_summary <descriptor> [--show-repro] [--all] [--summarize]
-
-where <descriptor> can be:
-  - a full url to the stdout of a specific bot.
-  - the segment of the url containing the bot name and build id number.
-  - the name of the bot, in which case the tool finds the latest build and show
-    results for it.
-
-Other parameters:
-${parser.usage}
-
-Examples:
-  bot_failure_summary https://build.chromium.org/p/client.dart/builders/dart2js-win8-ie11-be/builds/232/steps/steps/logs/stdio
-  bot_failure_summary dart2js-win8-ie11-be/builds/232
-  bot_failure_summary dart2js-win8-ie11-be
-''');
-    exit(1);
-  }
-
-  var arg = options.rest[0];
-  var urls = [];
-  if (arg.startsWith('http:') || arg.startsWith('https://')) {
-    urls.add(arg);
-  } else if (arg.contains('/')) {
-    // arg is of the form: dart2js-linux-chromeff-4-4-be/builds/183
-    if (!arg.endsWith('/')) arg = '$arg/';
-    String url = '$_prefix/builders/$arg';
-    if (arg.contains('dartium')) {
-      url = '$url$_annotatedStepsSuffix';
-    } else {
-      url = '$url$_defaultSuffix';
+  try {
+    ArgResults options = parser.parse(args);
+    if (options.rest.length != 1 || options['help']) {
+      showUsage();
+      exit(1);
     }
-    urls.add(url);
-  } else {
-    var builder = arg;
-    var response = await http.get('$_prefix/json/builders/$builder/?as_text=1');
-    var json = JSON.decode(response.body);
-    var isBuilding = json['state'] == 'building';
-    var buildNums = [];
-    int numBuildsLeft =
-        int.parse(options['builds'], onError: (s) => s == "all" ? 100000 : 0);
-    buildNums.addAll(json['cachedBuilds']);
-    if (isBuilding) buildNums.removeLast();
-    for (var buildNum in buildNums.reversed) {
-      if (--numBuildsLeft < 0) break;
-      String url = '$_prefix/builders/$builder/builds/$buildNum/';
-      if (builder.contains('dartium')) {
-        url = '$url$_annotatedStepsSuffix';
-      } else {
-        url = '$url$_defaultSuffix';
+    var descriptor = options.rest[0];
+
+    var file = new File(descriptor);
+    if (file.existsSync()) {
+      var body = file.readAsStringSync();
+      processBody(body, options);
+      return;
+    }
+
+    var numBuilds =
+        int.parse(options['builds'], onError: (s) => s == 'all' ? 10000 : 0);
+    var urls = await _buildLogUrls(descriptor, numBuilds);
+    if (urls.length != 1) {
+      print('Will download ${urls.length} urls.');
+      print('');
+    }
+
+    var combinedResult = <String, int>{};
+    for (String url in urls) {
+      var result = processBody(await _fetchLog(url), options);
+      if (result == null) continue;
+      for (String key in result) {
+        combinedResult[key] = (combinedResult[key] ?? 0) + 1;
       }
-      urls.add(url);
     }
-  }
 
-  if (urls.length != 1) {
-    print('Will download ${urls.length} urls.');
-    print('');
-  }
-
-  Map<String, int> combinedResult = {};
-  for (String url in urls) {
-    Set<String> result = await processUrl(
-      url,
-      options['show-repro'],
-    );
-    for (String key in result) {
-      combinedResult[key] = (combinedResult[key] ?? 0) + 1;
+    if (options['summarize']) {
+      print("Summary:");
+      if (combinedResult.isEmpty) print("No changes seen.");
+      combinedResult.keys
+          .map((key) =>
+              "${_pad(combinedResult[key], 2, left: true, padchar: '0')}: $key")
+          .toList()
+            ..sort()
+            ..reversed.forEach(print);
     }
-  }
-
-  if (options['summarize']) {
-    print("Summary:");
-    if (combinedResult.isEmpty) {
-      print("No changes seen.");
-    }
-    combinedResult.keys
-        .map((key) =>
-            "${_pad(combinedResult[key], 2, left: true, padchar: '0')}: $key")
-        .toList()
-          ..sort()
-          ..reversed.forEach(print);
+  } catch (e) {
+    print('$e');
+    showUsage();
   }
 }
 
-Future<Set<String>> processUrl(url, bool showRepro) async {
-  if (url.endsWith('/stdio')) url = '$url/text';
-  print('Loading data from: $url');
-  var response = await http.get(url);
-
-  if (response.statusCode != 200) {
-    print('HttpError: ${response.reasonPhrase}');
-    exit(1);
+Set<String> processBody(String body, ArgResults options) {
+  var records = parse(body);
+  if (options['status-file-updates']) {
+    _reportStatusFile(records);
+    return null;
+  } else {
+    return _reportChanges(records, options['show-repro']);
   }
+}
 
-  var body = response.body;
-
-  var records = [];
-
-  var suite;
-  var test;
-  var config;
-  var expected;
-  var actual;
-  bool reproIsNext = false;
-  for (var line in body.split('\n')) {
-    if (line.startsWith("FAILED: ")) {
-      int space = line.lastIndexOf(' ');
-      test = line.substring(space + 1).trim();
-      suite = '';
-      var slash = test.indexOf('/');
-      if (slash > 0) {
-        suite = test.substring(0, slash).trim();
-        test = test.substring(slash + 1).trim();
-      }
-      config = line
-          .substring("FAILED: ".length, space)
-          .replaceAll('release_ia32', '')
-          .replaceAll('release_x64', '');
-    }
-    if (line.startsWith("Expected: ")) {
-      expected = line.substring("Expected: ".length).trim();
-    }
-    if (line.startsWith("Actual: ")) {
-      actual = line.substring("Actual: ".length).trim();
-    }
-    if (reproIsNext) {
-      records
-          .add(new _Record(suite, test, config, expected, actual, line.trim()));
-      suite = test = config = expected = actual = null;
-      reproIsNext = false;
-    }
-    if (line.startsWith("Short reproduction command (experimental):")) {
-      reproIsNext = true;
-    }
-  }
-
+/// Computes a summary of expectation changes, prints it and returns it.
+Set<String> _reportChanges(List<Record> records, bool showRepro) {
   records.sort();
   String _actualString(r) {
     var color = r.isPassing ? 32 : 31;
@@ -197,6 +123,20 @@ Future<Set<String>> processUrl(url, bool showRepro) async {
   return changes;
 }
 
+/// Prints rows as they are annotated in status files.
+_reportStatusFile(List<Record> records) {
+  records.sort();
+  var last;
+  for (var record in records) {
+    if (last == record) continue;
+    if (last?.suite != record.suite || last?.config != record.config) {
+      print('\n${record.suite}.status ---- ${record.config}\n');
+    }
+    print('${record.test}: ${record.actual} # <add note here>');
+    last = record;
+  }
+}
+
 _pad(s, n, {left: false, padchar: ' '}) {
   s = '$s';
   if (s.length > n) return s;
@@ -204,39 +144,88 @@ _pad(s, n, {left: false, padchar: ' '}) {
   return left ? '$padding$s' : '$s$padding';
 }
 
-class _Record implements Comparable {
-  final String suite;
-  final String test;
-  final String config;
-  final String expected;
-  final String actual;
-  final String repro;
-  bool get isPassing => actual == 'Pass';
-
-  _Record(this.suite, this.test, this.config, this.expected, this.actual,
-      this.repro);
-
-  int compareTo(_Record other) {
-    if (suite == null && other.suite != null) return -1;
-    if (suite != null && other.suite == null) return 1;
-    if (test == null && other.test != null) return -1;
-    if (test != null && other.test == null) return 1;
-
-    if (isPassing && !other.isPassing) return -1;
-    if (!isPassing && other.isPassing) return 1;
-    var suiteDiff = suite.compareTo(other.suite);
-    if (suiteDiff != 0) return suiteDiff;
-
-    var testDiff = test.compareTo(other.test);
-    if (testDiff != 0) return testDiff;
-    return repro.compareTo(other.repro);
+/// Uses several heuristics to construct a URI where to fetch log data from.
+Future<List<String>> _buildLogUrls(String descriptor, int numBuilds) async {
+  // descriptor is a full URI
+  if (descriptor.startsWith('http:') || descriptor.startsWith('https://')) {
+    return [descriptor];
   }
 
-  bool operator ==(_Record other) =>
-      suite == other.suite &&
-      test == other.test &&
-      config == other.config &&
-      expected == other.expected &&
-      actual == other.actual &&
-      repro == other.repro;
+  // descriptor is of the form: dart2js-linux-chromeff-4-4-be/builds/183
+  if (descriptor.contains('/')) {
+    if (!descriptor.endsWith('/')) descriptor = '$descriptor/';
+    var url = '$_prefix/builders/$descriptor';
+    if (descriptor.contains('dartium')) {
+      url = '$url$_annotatedStepsSuffix';
+    } else {
+      url = '$url$_defaultSuffix';
+    }
+    return [url];
+  }
+
+  // descriptor is the name of a builder
+  var builder = descriptor;
+  List<int> builds = await _recentBuilds(builder, numBuilds);
+  List<String> result = <String>[];
+  for (var n in builds) {
+    var url = '$_prefix/builders/$builder/builds/$n/';
+    if (builder.contains('dartium')) {
+      url = '$url$_annotatedStepsSuffix';
+    } else {
+      url = '$url$_defaultSuffix';
+    }
+    result.add(url);
+  }
+  return result;
+}
+
+String _normalize(String url) => url.endsWith('/stdio') ? '$url/text' : url;
+
+/// Fetch a log from [url].
+Future<String> _fetchLog(String url) async {
+  url = _normalize(url);
+  print('Loading data from: $url');
+  var response = await http.get(url);
+
+  if (response.statusCode != 200) {
+    print('HttpError: ${response.reasonPhrase}');
+    exit(1);
+  }
+  return response.body;
+}
+
+/// Uses the json API of buildbot to determine the last [count] build ids of a
+/// specific builder.
+Future<List<int>> _recentBuilds(String builder, [int count = 1]) async {
+  var response = await http.get('$_prefix/json/builders/$builder/?as_text=1');
+  var json = JSON.decode(response.body);
+  var isBuilding = json['state'] == 'building';
+  var buildNums = json['cachedBuilds'];
+  if (isBuilding) buildNums.removeLast();
+  return buildNums.reversed.take(count).toList();
+}
+
+void showUsage() {
+  print('''
+Prints a list of tests whose expectations was incorrect in a single bot run.
+This includes tests that failed, or test that were expected to fail but started
+passing.
+
+usage: bot_failure_summary <descriptor> [--show-repro] [-b n|all] [--summarize]
+
+where <descriptor> can be:
+  - a full url to the stdout of a specific bot.
+  - the segment of the url containing the bot name and build id number.
+  - the name of the bot, in which case the tool finds the n (defaults to 1)
+    latest builds and shows results for it.
+  - a path to a text file available on local disk.
+
+Other parameters:
+${parser.usage}
+
+Examples:
+  bot_failure_summary https://build.chromium.org/p/client.dart/builders/dart2js-win8-ie11-be/builds/232/steps/steps/logs/stdio
+  bot_failure_summary dart2js-win8-ie11-be/builds/232
+  bot_failure_summary dart2js-win8-ie11-be
+''');
 }
