@@ -7,9 +7,6 @@ import 'package:bot_failures/record.dart';
 import 'package:bot_failures/log_parser.dart';
 import 'package:bot_failures/bot_json_api.dart';
 
-const _defaultSuffix = 'steps/steps/logs/stdio/text';
-const _annotatedStepsSuffix = 'steps/annotated_steps/logs/stdio/text';
-
 ArgParser parser = new ArgParser(allowTrailingOptions: true)
   ..addFlag('show-repro',
       negatable: false,
@@ -155,39 +152,46 @@ Future<List<String>> _buildLogUrls(String descriptor, ArgResults options) async 
     return [descriptor];
   }
 
-  // descriptor is of the form: dart2js-linux-chromeff-4-4-be/builds/183
+  String builder;
+  List<int> builds;
   if (descriptor.contains('/')) {
-    if (!descriptor.endsWith('/')) descriptor = '$descriptor/';
-    var url = '$botPrefix/builders/$descriptor';
-    if (descriptor.contains('dartium')) {
-      url = '$url$_annotatedStepsSuffix';
-    } else {
-      url = '$url$_defaultSuffix';
+    // descriptor is of the form: dart2js-linux-chromeff-4-4-be/builds/183
+    var parts = descriptor.split('/');
+    if (parts.length != 3 || parts[1] != 'builds') {
+      print('invalid descriptor: $descriptor,\n'
+          'expected a descriptor of the form: builder/builds/build-number');
+      exit(1);
     }
-    return [url];
+    builder = parts[0];
+    builds = [int.parse(parts[2])];
+  } else {
+    // descriptor is the name of a builder
+    builder = descriptor;
   }
 
-  // descriptor is the name of a builder
-  var builder = descriptor;
-  var numBuilds =
-    int.parse(options['builds'], onError: (s) => s == 'all' ? 10000 : 0);
-  List<int> builds = await recentBuilds(builder, numBuilds);
+  if (builds == null) {
+    var numBuilds =
+      int.parse(options['builds'], onError: (s) => s == 'all' ? 10000 : 0);
+    builds = await recentBuilds(builder, numBuilds);
+  }
+
   List<String> result = <String>[];
   bool findFailuresExperiment = options['find-failing-steps'];
   for (var n in builds) {
     var url = '$botPrefix/builders/$builder/builds/$n/';
+    var defaultStepName =
+      builder.contains('dartium') ? 'annotated_steps' : 'steps';
+    List<String> steps;
     if (findFailuresExperiment) {
-      var steps = await failingSteps(builder, n);
-      for (var step in steps) {
-        result.add('${url}steps/${Uri.encodeComponent(step)}/logs/stdio/text');
+      steps = await failingSteps(builder, n);
+      if (steps.isEmpty) {
+        steps = [defaultStepName];
       }
     } else {
-      if (builder.contains('dartium')) {
-        url = '$url$_annotatedStepsSuffix';
-      } else {
-        url = '$url$_defaultSuffix';
-      }
-      result.add(url);
+      steps = [defaultStepName];
+    }
+    for (var step in steps) {
+      result.add('${url}steps/${Uri.encodeComponent(step)}/logs/stdio/text');
     }
   }
   return result;
@@ -215,7 +219,7 @@ Prints a list of tests whose expectations was incorrect in a single bot run.
 This includes tests that failed, or test that were expected to fail but started
 passing.
 
-usage: bot_failure_summary <descriptor> [--show-repro] [-b n|all] [--summarize]
+usage: bot_failure_summary <descriptor> [<options>]
 
 where <descriptor> can be:
   - a full url to the stdout of a specific bot.
@@ -224,7 +228,7 @@ where <descriptor> can be:
     latest builds and shows results for it.
   - a path to a text file available on local disk.
 
-Other parameters:
+And <options> is a combination of the following:
 ${parser.usage}
 
 Examples:
